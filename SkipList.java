@@ -8,75 +8,92 @@ import java.util.*;
 //Instead of each level 0 entry and up acting like a bucket for a HashMap, 
 //                          when you add an element it's randomly determined how many nodes 
 //                          up you go for the express lanes.
-
-//Potential improvements: make each "tower" a single Object like a HashMap's bucket in a way.
+// Ideally I would overwrite an existing key if two keys are used as duplicates, but I'm not sure how to do that efficiently.
 public class SkipList<E extends Comparable<? super E>> {
     private static class SkipListNode<E> {
+        private int key;
         private E data;
         private SkipListNode<E> next, prev, above, below;
-        public SkipListNode(E element) {
+        public SkipListNode(int k, E element) {
+            this.key = k;
             this.data = element;
             next = prev = above = below = null;
         }
+        public String toString() {
+            if (key == Integer.MIN_VALUE) {
+                return "[-∞]"; //just for easier labeling
+            } else if (key == Integer.MAX_VALUE) {
+                return "[∞]";
+            }
+            return "[" + key + ", " + data.toString() + "]";
+        }
     }
     private SkipListNode<E> head;
+    private SkipListNode<E> tail;
     private int currentLevel;
     private int totalEntries;
     private Random randomGen;
-    public SkipList(E headData) {
+    public SkipList() {
         currentLevel = totalEntries = 0;
         randomGen = new Random();
-        head = new SkipListNode(headData); //head is the top left most node
-        totalEntries = 1;
+        head = new SkipListNode<>(Integer.MIN_VALUE, null); //head is the top left most node with no proper value
+        tail = new SkipListNode<>(Integer.MAX_VALUE, null);
+        head.next = tail;
+        tail.prev = head;
+        currentLevel = 0;
+        totalEntries = 0;
     }
 
-    public SkipListNode<E> below(SkipListNode<E> p) {
+    private int key(SkipListNode<E> p) {
+        return p.key;
+    }
+
+    private SkipListNode<E> below(SkipListNode<E> p) {
         return p.below;
     }
 
-    public SkipListNode<E> above(SkipListNode<E> p) {
+    private SkipListNode<E> above(SkipListNode<E> p) {
         return p.above;
     }
     
-    public SkipListNode<E> next(SkipListNode<E> p) {
+    private SkipListNode<E> next(SkipListNode<E> p) {
         return p.next;
     }
 
-    public SkipListNode<E> prev(SkipListNode<E> p) {
+    private SkipListNode<E> prev(SkipListNode<E> p) {
         return p.prev;
     }
 
-    public SkipListNode<E> search(E e) {
+    //Returns the node that would be right before the node to be inserted or removed, based on key ordering
+    public SkipListNode<E> search(int key) {
         SkipListNode<E> p = head;
         while (below(p) != null) {
             p = below(p);
-            while (e.compareTo(next(p).data) >= 0) {
+            while (key >= key(next(p))) {
                 p = next(p);
             }
         }
         return p;
     }
     
-    //My original version of the Node class had a field for each node's level in the SkipList
-    //But that's not necessary because there is no need to track the level
-    //The only reason I thought I needed is because the new variable "node" had to be on the same level as the parameter p
-    //But they can be on the same level without any internal fields for int level by just setting them adjacent to each other horizontally.
-    public SkipListNode<E> insertAfterAbove(SkipListNode<E> p, SkipListNode<E> q, E e) {
-        SkipListNode<E> node = new SkipListNode(e);
+    //if p is null -> only for making new head
+    //make new node: to right of p (same level), above q
+    public SkipListNode<E> insertAfterAbove(SkipListNode<E> p, SkipListNode<E> q, int key, E e) {
+        SkipListNode<E> node = new SkipListNode<>(key, e);
         node.prev = p;
-        node.next = p.next;
-        p.next = node;
         node.below = q;
-        //if (q != null) {} Going above q is not necessary 
-        //because p should ALWAYS be in the level above q
-        //at least in the looping in the textbook
-        //when we make it per iteration there's nothing above the new node
+        if (p != null) {
+            node.next = p.next;
+            p.next = node;
+        }
+        if (q != null) { //if not bottom level
+            q.above = node;
+        }
         return node;
     }
-        
-
-    public SkipListNode<E> insert(E e) {
-        SkipListNode<E> p = search(e);
+    
+    public SkipListNode<E> insert(int key, E e) {
+        SkipListNode<E> p = search(key);
         SkipListNode<E> q = null;
         int i = -1;
         boolean canAdd = true;
@@ -84,10 +101,11 @@ public class SkipList<E extends Comparable<? super E>> {
             i++;
             if (i >= currentLevel) {
                 currentLevel++;
-                //insertAfterAbove
-                //insertAfterAbove
+                tail = next(head);
+                head = insertAfterAbove(null, head, Integer.MIN_VALUE, null); //Make a new level for the head column, keeping links
+                insertAfterAbove(head, tail, Integer.MAX_VALUE, null); //Make a new node for the tail column that connects to the newly made head and tail underneath it
             }
-            q = insertAfterAbove(p, q, e);
+            q = insertAfterAbove(p, q, key, e);
             while (above(p) == null) {
                 p = prev(p);
             }
@@ -98,24 +116,55 @@ public class SkipList<E extends Comparable<? super E>> {
         return q;
     }
 
-    //public SkipListNode<E> remove(E e) {
-    public void remove(E e) {
-        if (e == null) {
-            //return null; //throw new NullPointerException
-            return;
-        }
-        SkipListNode<E> searchResult = search(e);
-        //SkipListNode<E> current = searchResult; in case I decide to return the removed node, not sure how I want to implement this.
-        if (searchResult == null) {
+    public void remove(int key) {
+        SkipListNode<E> searchResult = search(key);
+        if (searchResult == null || key(searchResult) != key) {
             throw new NoSuchElementException();
         }
-        if (!e.equals(searchResult.data)) {
-            return;
-        }
         while (searchResult != null) {
-            searchResult.prev.next = searchResult.next;
-            searchResult.next.prev = searchResult.prev;
+            if (searchResult.prev != null) {
+                searchResult.prev.next = searchResult.next;
+            }
+            if (searchResult.next != null) {
+                searchResult.next.prev = searchResult.prev;
+            }
+            searchResult = searchResult.above;
         }
-        //return searchResult;
+        totalEntries--;
+    }
+
+    //An actual get method because the search method does not return an exact retrieval
+    //With current implementation of existing duplicates this can have issues
+    public E get(int key) {
+        SkipListNode<E> node = search(key);
+        if (key == key(node)) {
+            return node.data;
+        }
+        return null;
+    }
+
+    
+
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        SkipListNode<E> currentHeadLevel = head;
+        SkipListNode<E> currentNode = currentHeadLevel;
+        System.out.println("Current level: " + currentLevel);
+        for (int lvl = currentLevel; lvl >= 0; lvl--) {
+            sb.append(lvl).append(": ");
+            while (currentNode != null) {
+                sb.append(currentNode.toString());
+                currentNode = next(currentNode);
+                if (currentNode != null) {
+                    sb.append(" -> ");
+                }
+            }
+            if (lvl > 0) {
+                sb.append("\n");
+                currentHeadLevel = currentNode = below(currentHeadLevel);
+            }
+            
+        }
+        return sb.toString();
     }
 }
